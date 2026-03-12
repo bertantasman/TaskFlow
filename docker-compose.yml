@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  api-gateway:
+    build: ./api-gateway
+    command: ["npm", "start"]
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - rabbitmq
+
+  auth-service:
+    build: ./auth-service
+    command: ["npm", "start"]
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - rabbitmq
+
+  task-service:
+    build: ./task-service
+    command: ["npm", "start"]
+    ports:
+      - "4002:4002"
+    environment:
+      - PORT=4002
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - rabbitmq
+
+  notification-service:
+    build: ./notification-service
+    command: ["npm", "start"]
+    ports:
+      - "4003:4003"
+    environment:
+      - PORT=4003
+      - RABBITMQ_URL=amqp://rabbitmq:5672
+    depends_on:
+      - rabbitmq
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
