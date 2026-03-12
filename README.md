@@ -304,4 +304,3 @@ During the demo you can connect each step to the theory:
 - accessing **protected microservice endpoints**,
 - seeing **asynchronous events** and **notifications** through RabbitMQ.
 
-
