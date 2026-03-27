@@ -3,11 +3,16 @@ const express = require('express');
 const amqp = require('amqplib');
 
 const app = express();
-const PORT = process.env.PORT || 4003;
+const PORT = process.env.PORT;
+if (!PORT) {
+  throw new Error('PORT is required (set process.env.PORT)');
+}
 
 // In Docker we pass RABBITMQ_URL=amqp://rabbitmq:5672.
-// Here we also provide a localhost default for simple local testing.
-const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
+const RABBITMQ_URL = process.env.RABBITMQ_URL;
+if (!RABBITMQ_URL) {
+  throw new Error('RABBITMQ_URL is required (set process.env.RABBITMQ_URL)');
+}
 const TASK_EXCHANGE = 'task_events';
 
 // Keep trying to connect to RabbitMQ until it is ready.
@@ -64,10 +69,14 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'notification-service' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Notification Service listening on port ${PORT}`);
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Notification Service listening on port ${PORT}`);
 
-  // Start listening for task_created events after the HTTP server is up.
-  connectWithRetry();
-});
+    // Start listening for task_created events after the HTTP server is up.
+    connectWithRetry();
+  });
+}
+
+module.exports = { app };
 

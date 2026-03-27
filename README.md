@@ -188,6 +188,20 @@ To stop and remove the containers:
 docker compose down
 ```
 
+## Environment Variables
+
+The services use environment variables for configuration (JWT secret, RabbitMQ URL, and internal service URLs).
+You can start from:
+
+```bash
+cp .env.example .env
+```
+
+Key variables:
+- `JWT_SECRET`: Auth Service signs JWT tokens with this secret, and Task Service verifies them.
+- `RABBITMQ_URL`: RabbitMQ connection string used by Task Service and Notification Service.
+- `AUTH_SERVICE_URL`, `TASK_SERVICE_URL`: Internal URLs used by API Gateway to forward requests (inside Docker).
+
 ## Example API Endpoints (via API Gateway)
 
 In the examples below, all requests are sent to the **API Gateway** at `http://localhost:4000`.
@@ -310,4 +324,24 @@ During the demo you can connect each step to the theory:
 - authenticating and getting a **JWT**,
 - accessing **protected microservice endpoints**,
 - seeing **asynchronous events** and **notifications** through RabbitMQ.
+
+## Running Tests
+
+Tests are written with Jest + Supertest and run at the repository root:
+
+```bash
+npm test
+```
+
+The tests mock RabbitMQ publishing so they do not require a running RabbitMQ container.
+
+## CI/CD Pipeline (GitHub Actions)
+
+This repository includes a GitHub Actions workflow at `.github/workflows/ci.yml`.
+On every push and pull request to `main`, it runs:
+
+- `npm ci`
+- `npm test`
+
+It also runs `docker compose build` as an optional lightweight build check.
 

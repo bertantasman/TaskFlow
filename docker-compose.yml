@@ -7,8 +7,9 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - PORT=4000
-      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - PORT=${API_GATEWAY_PORT:-4000}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth-service:4001}
+      - TASK_SERVICE_URL=${TASK_SERVICE_URL:-http://task-service:4002}
     depends_on:
       - rabbitmq
 
@@ -18,8 +19,9 @@ services:
     ports:
       - "4001:4001"
     environment:
-      - PORT=4001
-      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - PORT=${AUTH_SERVICE_PORT:-4001}
+      - JWT_SECRET=${JWT_SECRET:-supersecret}
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://rabbitmq:5672}
     depends_on:
       - rabbitmq
 
@@ -29,8 +31,9 @@ services:
     ports:
       - "4002:4002"
     environment:
-      - PORT=4002
-      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - PORT=${TASK_SERVICE_PORT:-4002}
+      - JWT_SECRET=${JWT_SECRET:-supersecret}
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://rabbitmq:5672}
     depends_on:
       - rabbitmq
 
@@ -40,8 +43,8 @@ services:
     ports:
       - "4003:4003"
     environment:
-      - PORT=4003
-      - RABBITMQ_URL=amqp://rabbitmq:5672
+      - PORT=${NOTIFICATION_SERVICE_PORT:-4003}
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://rabbitmq:5672}
     depends_on:
       - rabbitmq
 
@@ -50,4 +53,9 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 

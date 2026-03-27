@@ -3,12 +3,21 @@ const express = require('express');
 const axios = require('axios');
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT;
+if (!PORT) {
+  throw new Error('PORT is required (set process.env.PORT)');
+}
 
 // These URLs point to the other services inside Docker.
 // For local testing you can override them using environment variables.
-const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://auth-service:4001';
-const TASK_SERVICE_URL = process.env.TASK_SERVICE_URL || 'http://task-service:4002';
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL;
+if (!AUTH_SERVICE_URL) {
+  throw new Error('AUTH_SERVICE_URL is required (set process.env.AUTH_SERVICE_URL)');
+}
+const TASK_SERVICE_URL = process.env.TASK_SERVICE_URL;
+if (!TASK_SERVICE_URL) {
+  throw new Error('TASK_SERVICE_URL is required (set process.env.TASK_SERVICE_URL)');
+}
 
 app.use(express.json());
 
@@ -112,7 +121,11 @@ app.all('/tasks/*', authenticate, async (req, res) => {
   await forwardToTasks(req, res);
 });
 
-app.listen(PORT, () => {
-  console.log(`API Gateway listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`API Gateway listening on port ${PORT}`);
+  });
+}
+
+module.exports = { app };
 

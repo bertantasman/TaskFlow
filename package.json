@@ -1,0 +1,18 @@
+{
+  "name": "taskflow-microservice-system",
+  "private": true,
+  "workspaces": [
+    "api-gateway",
+    "auth-service",
+    "task-service",
+    "notification-service"
+  ],
+  "scripts": {
+    "test": "jest --runInBand"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}
+

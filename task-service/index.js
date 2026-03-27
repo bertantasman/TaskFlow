@@ -4,12 +4,22 @@ const jwt = require('jsonwebtoken');
 const amqp = require('amqplib');
 
 const app = express();
-const PORT = process.env.PORT || 4002;
+const PORT = process.env.PORT;
+if (!PORT) {
+  throw new Error('PORT is required (set process.env.PORT)');
+}
 
 // In a real system these values should come from
 // environment variables and be kept secret.
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
-const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://localhost:5672';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is required (set process.env.JWT_SECRET)');
+}
+
+const RABBITMQ_URL = process.env.RABBITMQ_URL;
+if (!RABBITMQ_URL) {
+  throw new Error('RABBITMQ_URL is required (set process.env.RABBITMQ_URL)');
+}
 
 // Simple in-memory task storage.
 // Data will be lost every time the service restarts.
@@ -142,7 +152,11 @@ app.post('/tasks', authenticate, async (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Task Service listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Task Service listening on port ${PORT}`);
+  });
+}
+
+module.exports = { app };
 

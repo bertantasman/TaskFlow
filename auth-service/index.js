@@ -3,12 +3,17 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-const PORT = process.env.PORT || 4001;
+const PORT = process.env.PORT;
+if (!PORT) {
+  throw new Error('PORT is required (set process.env.PORT)');
+}
 
 // In a real application this secret must come from
 // a secure environment variable and NEVER be hard-coded.
-// Here we provide a default value to keep the example simple.
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is required (set process.env.JWT_SECRET)');
+}
 
 // Very simple in-memory user storage.
 // This is reset every time the service restarts and
@@ -89,7 +94,11 @@ app.post('/login', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Auth Service listening on port ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Auth Service listening on port ${PORT}`);
+  });
+}
+
+module.exports = { app };
 
