@@ -7,9 +7,9 @@ services:
     ports:
       - "4000:4000"
     environment:
-      - PORT=${API_GATEWAY_PORT:-4000}
-      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth-service:4001}
-      - TASK_SERVICE_URL=${TASK_SERVICE_URL:-http://task-service:4002}
+      - PORT=${API_GATEWAY_PORT}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
+      - TASK_SERVICE_URL=${TASK_SERVICE_URL}
     depends_on:
       - rabbitmq
 
@@ -19,9 +19,8 @@ services:
     ports:
       - "4001:4001"
     environment:
-      - PORT=${AUTH_SERVICE_PORT:-4001}
-      - JWT_SECRET=${JWT_SECRET:-supersecret}
-      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://rabbitmq:5672}
+      - PORT=${AUTH_SERVICE_PORT}
+      - JWT_SECRET=${JWT_SECRET}
     depends_on:
       - rabbitmq
 
@@ -31,9 +30,9 @@ services:
     ports:
       - "4002:4002"
     environment:
-      - PORT=${TASK_SERVICE_PORT:-4002}
-      - JWT_SECRET=${JWT_SECRET:-supersecret}
-      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://rabbitmq:5672}
+      - PORT=${TASK_SERVICE_PORT}
+      - JWT_SECRET=${JWT_SECRET}
+      - RABBITMQ_URL=${RABBITMQ_URL}
     depends_on:
       - rabbitmq
 
@@ -43,8 +42,8 @@ services:
     ports:
       - "4003:4003"
     environment:
-      - PORT=${NOTIFICATION_SERVICE_PORT:-4003}
-      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://rabbitmq:5672}
+      - PORT=${NOTIFICATION_SERVICE_PORT}
+      - RABBITMQ_URL=${RABBITMQ_URL}
     depends_on:
       - rabbitmq
 
@@ -58,4 +57,29 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api-gateway
+      - auth-service
+      - task-service
+      - notification-service
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
 

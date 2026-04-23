@@ -36,7 +36,7 @@ describe('Auth API (via API Gateway)', () => {
   test('POST /auth/register returns 201', async () => {
     const res = await request(gatewayApp)
       .post('/auth/register')
-      .send({ username: 'testuser', password: '123456' });
+      .send({ email: 'testuser@example.com', password: '123456' });
 
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ message: 'User registered successfully' });
@@ -46,11 +46,20 @@ describe('Auth API (via API Gateway)', () => {
     // Log in using the same credentials as register
     const res = await request(gatewayApp)
       .post('/auth/login')
-      .send({ username: 'testuser', password: '123456' });
+      .send({ email: 'testuser@example.com', password: '123456' });
 
     expect(res.status).toBe(200);
     expect(res.body.token).toBeTruthy();
     expect(typeof res.body.token).toBe('string');
+  });
+
+  test('POST /auth/login with invalid password returns 401', async () => {
+    const res = await request(gatewayApp)
+      .post('/auth/login')
+      .send({ email: 'testuser@example.com', password: 'wrong-password' });
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ message: 'Invalid username or password' });
   });
 });
 

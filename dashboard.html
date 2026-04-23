@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskFlow - Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="dashboard">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-avatar" aria-hidden="true">TF</span>
+      <span class="brand-dot"></span>
+      <span>TaskFlow</span>
+    </div>
+    <button id="logout-btn" type="button" class="ghost topbar-btn">Logout</button>
+  </header>
+
+  <main class="dashboard-wrap">
+    <section class="welcome-card card">
+      <h1>Welcome to your dashboard</h1>
+      <p class="subtitle">Create, track, and manage your tasks with a clean workflow.</p>
+      <div class="welcome-metrics" aria-label="Task overview">
+        <div class="metric-box">
+          <p class="metric-label">Total Tasks</p>
+          <p id="metric-total" class="metric-value">0</p>
+        </div>
+        <div class="metric-box">
+          <p class="metric-label">Completed</p>
+          <p id="metric-completed" class="metric-value">0</p>
+        </div>
+      </div>
+      <div class="progress-wrap" aria-label="Task completion progress">
+        <div class="progress-head">
+          <p class="metric-label">Completion Progress</p>
+          <p id="metric-percent" class="metric-percent">0%</p>
+        </div>
+        <div class="progress-track">
+          <div id="progress-fill" class="progress-fill" style="width: 0%;"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="card panel">
+        <h2>Create Task</h2>
+        <p class="card-subtitle">Add a new task with title and details.</p>
+        <form id="task-form">
+          <label for="title">Title</label>
+          <input id="title" name="title" type="text" placeholder="Task title" required />
+
+          <label for="description">Description</label>
+          <textarea id="description" name="description" rows="4" placeholder="Task details"></textarea>
+
+          <label for="visibility">Visibility</label>
+          <select id="visibility" name="visibility">
+            <option value="private">Private</option>
+            <option value="public">Public</option>
+          </select>
+
+          <button type="submit" class="primary">Create Task</button>
+        </form>
+        <p id="task-message" class="message"></p>
+      </article>
+
+      <article class="card panel">
+        <div class="panel-header">
+          <h2>Task List</h2>
+          <div class="panel-actions">
+            <select id="task-filter" aria-label="Task filter">
+              <option value="visible">All Visible Tasks</option>
+              <option value="mine">My Tasks</option>
+              <option value="public">Public Tasks</option>
+            </select>
+            <input
+              id="task-search"
+              type="search"
+              placeholder="Search by title..."
+              aria-label="Search tasks by title"
+            />
+            <button id="refresh-btn" type="button" class="ghost">Refresh</button>
+          </div>
+        </div>
+        <p class="card-subtitle">See the latest tasks and their current status.</p>
+        <ul id="task-list" class="task-list"></ul>
+      </article>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

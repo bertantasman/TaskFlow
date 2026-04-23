@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TaskFlow - Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body data-page="auth">
+  <div class="auth-layout">
+    <header class="auth-brand">
+      <div class="brand-mark" aria-hidden="true">TF</div>
+      <p class="brand-kicker">TaskFlow Platform</p>
+      <h1>Modern Task Workspace</h1>
+      <p class="subtitle">
+        Sign in to manage tasks, track status, and monitor your workflow in one place.
+      </p>
+    </header>
+
+    <main class="auth-shell">
+      <section class="card auth-card">
+        <h2>Welcome back</h2>
+        <p class="card-subtitle">Use your account to login or create a new one.</p>
+
+        <form id="auth-form">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" placeholder="student@example.com" required />
+
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" placeholder="Enter password" required />
+
+          <div class="actions">
+            <button id="register-btn" type="button" class="ghost">Register</button>
+            <button id="login-btn" type="button" class="primary">Login</button>
+          </div>
+        </form>
+
+        <p id="auth-message" class="message"></p>
+        <p class="helper-text">
+          Login is primary. Register is for first-time users.
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
