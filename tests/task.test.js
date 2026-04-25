@@ -26,6 +26,8 @@ describe('Task API (via API Gateway)', () => {
   let user1PublicTaskId;
   let user2PrivateTaskId;
   let user2PublicTaskId;
+  let selectedTaskId;
+  let datedTaskId;
 
   beforeAll(async () => {
     jest.resetModules();
@@ -224,9 +226,156 @@ describe('Task API (via API Gateway)', () => {
     expect(normalizedTask).toBeTruthy();
     expect(normalizedTask.status).toBe('completed');
     expect(normalizedTask.visibility).toBe('public');
+    expect(normalizedTask.createdAt).toBeTruthy();
+    expect(normalizedTask.progressStatus).toBeTruthy();
   });
 
-  test('Owner can patch own task and non-owner gets 403', async () => {
+  test('GET /users returns safe user list without passwords', async () => {
+    const res = await request(gatewayApp)
+      .get('/users')
+      .set('Authorization', `Bearer ${user1Token}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.some((user) => user.email === 'user1@example.com')).toBe(true);
+    expect(res.body.every((user) => !Object.prototype.hasOwnProperty.call(user, 'passwordHash'))).toBe(true);
+  });
+
+  test('selected visibility task is only visible to allowed users', async () => {
+    const createRes = await request(gatewayApp)
+      .post('/tasks')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({
+        title: 'Selected Shared Task',
+        description: 'Only selected users can view this',
+        visibility: 'selected',
+        allowedUsers: ['user2@example.com']
+      });
+
+    expect(createRes.status).toBe(201);
+    selectedTaskId = createRes.body.task.id;
+
+    const visibleForAllowed = await request(gatewayApp)
+      .get('/tasks?filter=visible')
+      .set('Authorization', `Bearer ${user2Token}`);
+
+    expect(visibleForAllowed.status).toBe(200);
+    expect(visibleForAllowed.body.map((task) => task.id)).toContain(selectedTaskId);
+
+    const user3Register = await request(gatewayApp)
+      .post('/auth/register')
+      .send({ email: 'user3@example.com', password: 'pass3' });
+    expect([201, 400]).toContain(user3Register.status);
+
+    const user3Login = await request(gatewayApp)
+      .post('/auth/login')
+      .send({ email: 'user3@example.com', password: 'pass3' });
+    expect(user3Login.status).toBe(200);
+
+    const hiddenForOthers = await request(gatewayApp)
+      .get('/tasks?filter=visible')
+      .set('Authorization', `Bearer ${user3Login.body.token}`);
+    expect(hiddenForOthers.status).toBe(200);
+    expect(hiddenForOthers.body.map((task) => task.id)).not.toContain(selectedTaskId);
+  });
+
+  test('date filter returns tasks in requested range and validates format', async () => {
+    const createRes = await request(gatewayApp)
+      .post('/tasks')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({
+        title: 'Date Filter Task',
+        description: 'Task with createdAt for date filtering',
+        visibility: 'public'
+      });
+    expect(createRes.status).toBe(201);
+    datedTaskId = createRes.body.task.id;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const inRangeRes = await request(gatewayApp)
+      .get(`/tasks?filter=visible&from=${today}&to=${today}`)
+      .set('Authorization', `Bearer ${user1Token}`);
+    expect(inRangeRes.status).toBe(200);
+    expect(inRangeRes.body.map((task) => task.id)).toContain(datedTaskId);
+
+    const invalidRes = await request(gatewayApp)
+      .get('/tasks?filter=visible&from=2026-13-99')
+      .set('Authorization', `Bearer ${user1Token}`);
+    expect(invalidRes.status).toBe(400);
+  });
+
+  test('Creator can cancel own public task with reason', async () => {
+    const ownerCancelRes = await request(gatewayApp)
+      .patch(`/tasks/${user1PublicTaskId}/cancel`)
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({ reason: 'No longer needed' });
+    expect(ownerCancelRes.status).toBe(200);
+    expect(ownerCancelRes.body.task.status).toBe('cancelled');
+    expect(ownerCancelRes.body.task.cancelledReason).toBe('No longer needed');
+
+    const missingReasonRes = await request(gatewayApp)
+      .patch(`/tasks/${selectedTaskId}/cancel`)
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({ reason: '   ' });
+    expect(missingReasonRes.status).toBe(400);
+
+  });
+
+  test('selected collaborator can update progressStatus', async () => {
+    const ownerProgressRes = await request(gatewayApp)
+      .patch(`/tasks/${selectedTaskId}`)
+      .set('Authorization', `Bearer ${user2Token}`)
+      .send({ progressStatus: 'in_progress' });
+    expect(ownerProgressRes.status).toBe(200);
+    expect(ownerProgressRes.body.task.progressStatus).toBe('in_progress');
+  });
+
+  test('public viewer cannot update public task unless selected', async () => {
+    const user3Login = await request(gatewayApp)
+      .post('/auth/login')
+      .send({ email: 'user3@example.com', password: 'pass3' });
+    expect(user3Login.status).toBe(200);
+
+    const publicViewerUpdateRes = await request(gatewayApp)
+      .patch(`/tasks/${user1PublicTaskId}`)
+      .set('Authorization', `Bearer ${user3Login.body.token}`)
+      .send({ progressStatus: 'completed' });
+    expect(publicViewerUpdateRes.status).toBe(403);
+  });
+
+  test('selected collaborator can cancel selected task with reason', async () => {
+    const collaboratorCancelRes = await request(gatewayApp)
+      .patch(`/tasks/${selectedTaskId}/cancel`)
+      .set('Authorization', `Bearer ${user2Token}`)
+      .send({ reason: 'Completed externally' });
+    expect(collaboratorCancelRes.status).toBe(200);
+    expect(collaboratorCancelRes.body.task.status).toBe('cancelled');
+    expect(collaboratorCancelRes.body.task.cancelledReason).toBe('Completed externally');
+  });
+
+  test('selected collaborator can patch status on selected task', async () => {
+    const recreateRes = await request(gatewayApp)
+      .post('/tasks')
+      .set('Authorization', `Bearer ${user1Token}`)
+      .send({
+        title: 'Selected Status Task',
+        description: 'For collaborator status patch',
+        visibility: 'selected',
+        allowedUsers: ['user2@example.com']
+      });
+    expect(recreateRes.status).toBe(201);
+    const selectedStatusTaskId = recreateRes.body.task.id;
+
+    const collaboratorUpdateRes = await request(gatewayApp)
+      .patch(`/tasks/${selectedStatusTaskId}`)
+      .set('Authorization', `Bearer ${user2Token}`)
+      .send({ status: 'completed' });
+
+    expect(collaboratorUpdateRes.status).toBe(200);
+    expect(collaboratorUpdateRes.body.task.status).toBe('completed');
+  });
+
+  test('private task remains creator-only for modifications', async () => {
     const ownerUpdateRes = await request(gatewayApp)
       .patch(`/tasks/${user1PrivateTaskId}`)
       .set('Authorization', `Bearer ${user1Token}`)
@@ -241,7 +390,17 @@ describe('Task API (via API Gateway)', () => {
       .send({ status: 'pending' });
 
     expect(nonOwnerUpdateRes.status).toBe(403);
-    expect(nonOwnerUpdateRes.body).toEqual({ message: 'You can only update your own tasks' });
+    expect(nonOwnerUpdateRes.body).toEqual({ message: 'You do not have permission to update this task' });
+  });
+
+  test('non-creator cannot change sharing settings via patch', async () => {
+    const sharingPatchRes = await request(gatewayApp)
+      .patch(`/tasks/${selectedTaskId}`)
+      .set('Authorization', `Bearer ${user2Token}`)
+      .send({ visibility: 'public' });
+
+    expect(sharingPatchRes.status).toBe(403);
+    expect(sharingPatchRes.body).toEqual({ message: 'Only creator can change sharing settings or ownership' });
   });
 
   test('Owner can delete own task and non-owner gets 403', async () => {

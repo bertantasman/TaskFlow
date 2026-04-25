@@ -1,67 +1,41 @@
 API Documentation - TaskFlow
 ============================
 
-This document describes the main HTTP API endpoints of TaskFlow.
-All requests are sent to the **API Gateway** at `http://localhost:4000`.
+All requests are sent to the API Gateway at `http://localhost:4000`.
 
-Authentication uses JSON Web Tokens (JWT). Protected endpoints require
-an `Authorization` header in the form:
+For protected routes, include:
 
 ```http
 Authorization: Bearer <jwt_token_here>
 ```
 
-## Auth Service (via API Gateway)
+## Auth Endpoints
 
-Base path (through gateway): `http://localhost:4000/auth`
+### `POST /auth/register`
+Register user.
 
-### 1. Register a new user
-
-- **Method**: `POST`
-- **URL**: `/auth/register`
-- **Description**: Create a new user in the in-memory user store.
-
-**Request body**
+Request body:
 
 ```json
 {
-  "username": "testuser",
+  "email": "user@example.com",
   "password": "123456"
 }
 ```
 
-**Successful response (201)**
+### `POST /auth/login`
+Login and receive JWT.
+
+Request body:
 
 ```json
 {
-  "message": "User registered successfully"
-}
-```
-
-If the username already exists, a `400` response is returned:
-
-```json
-{
-  "message": "User already exists"
-}
-```
-
-### 2. Log in and obtain a JWT token
-
-- **Method**: `POST`
-- **URL**: `/auth/login`
-- **Description**: Log in with username and password and receive a JWT token.
-
-**Request body**
-
-```json
-{
-  "username": "testuser",
+  "email": "user@example.com",
   "password": "123456"
 }
 ```
 
-**Successful response (200)**
+Success response:
 
 ```json
 {
@@ -69,110 +43,140 @@ If the username already exists, a `400` response is returned:
 }
 ```
 
-If the credentials are invalid, a `401` response is returned:
+### `GET /users` (protected)
+Return safe user list for sharing UI.
 
-```json
-{
-  "message": "Invalid username or password"
-}
-```
-
-You will use the returned `token` value in the `Authorization` header
-for all protected Task Service endpoints.
-
-## Task Service (via API Gateway)
-
-Base path (through gateway): `http://localhost:4000`
-
-All Task Service endpoints are **protected** and require a valid JWT token.
-
-### Authentication header example
-
-```http
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-Replace the long string after `Bearer` with the actual token returned by `/auth/login`.
-
-### 1. List tasks
-
-- **Method**: `GET`
-- **URL**: `/tasks`
-- **Description**: Return the list of tasks for the system.
-- **Authentication**: required (`Authorization: Bearer <token>`)
-
-**Example request**
-
-```http
-GET /tasks HTTP/1.1
-Host: localhost:4000
-Authorization: Bearer <jwt_token_here>
-```
-
-**Example successful response (200)**
+Success response:
 
 ```json
 [
   {
-    "id": 1,
-    "title": "Finish assignment"
-  },
-  {
-    "id": 2,
-    "title": "Review lecture notes"
+    "email": "user1@example.com",
+    "role": "user"
   }
 ]
 ```
 
-If the token is missing or invalid, a `401` response is returned:
+Passwords and password hashes are never returned.
+
+## Task Model
+
+Task objects include:
 
 ```json
 {
-  "message": "Unauthorized"
+  "id": 1,
+  "title": "Prepare report",
+  "description": "Write weekly summary",
+  "status": "pending",
+  "visibility": "selected",
+  "createdBy": "user1@example.com",
+  "createdAt": "2026-04-25T09:15:00.000Z",
+  "allowedUsers": ["user2@example.com"],
+  "cancelledReason": null,
+  "cancelledAt": null,
+  "cancelledBy": null,
+  "progressStatus": "in_progress",
+  "progressPercent": 50
 }
 ```
 
-### 2. Create a new task
+## Task Endpoints (all protected)
 
-- **Method**: `POST`
-- **URL**: `/tasks`
-- **Description**: Create a new task in the in-memory task store.
-- **Authentication**: required (`Authorization: Bearer <token>`)
+### `GET /tasks`
+List tasks user is allowed to see.
 
-**Request body**
+Query params:
+- `filter=mine|public|visible` (default `visible`)
+- `from=YYYY-MM-DD` (optional)
+- `to=YYYY-MM-DD` (optional)
+
+Access rules:
+- creator always sees own tasks
+- `public` tasks visible to all users
+- `private` tasks visible only to creator
+- `selected` tasks visible to creator and `allowedUsers`
+
+### `POST /tasks`
+Create task.
+
+Request body:
 
 ```json
 {
-  "title": "Finish assignment"
+  "title": "Prepare report",
+  "description": "Write weekly summary",
+  "status": "pending",
+  "visibility": "selected",
+  "allowedUsers": ["user2@example.com"],
+  "progressStatus": "not_started"
 }
 ```
 
-**Example successful response (201)**
+Notes:
+- `createdBy` is always derived from JWT user, not request body.
+- If `visibility` is `selected`, `allowedUsers` must be provided.
+
+### `PATCH /tasks/:id`
+Update task status and/or progress status.
+
+Permissions:
+- creator: allowed
+- selected collaborator (`allowedUsers` on selected task): allowed
+- other users: forbidden (`403`)
+- changing sharing fields (`visibility`, `allowedUsers`) or `createdBy` via this endpoint is forbidden for non-creators
+
+Request body examples:
 
 ```json
 {
-  "message": "Task created successfully",
-  "task": {
-    "id": 1,
-    "title": "Finish assignment"
-  }
+  "status": "completed"
 }
 ```
-
-If the `title` field is missing, a `400` response is returned:
 
 ```json
 {
-  "message": "title is required"
+  "progressStatus": "in_progress"
 }
 ```
 
-When a task is created, the Task Service also publishes a `task_created`
-event to RabbitMQ. The Notification Service listens for this event and logs:
+### `PATCH /tasks/:id/cancel`
+Cancel task with reason.
 
-```text
-Notification received: new task created
+Permissions:
+- creator: allowed
+- selected collaborator (`allowedUsers` on selected task): allowed
+- other users: forbidden (`403`)
+
+Request body:
+
+```json
+{
+  "reason": "Blocked by dependency"
+}
 ```
 
-This demonstrates asynchronous, event-driven communication between services.
+On success:
+- `status` becomes `cancelled`
+- `cancelledReason`, `cancelledAt`, `cancelledBy` are set
+
+### `DELETE /tasks/:id`
+Delete task (creator only).
+
+Selected collaborators cannot delete shared tasks.
+
+## Status Codes and Error Shape
+
+Common response shape:
+
+```json
+{
+  "message": "..."
+}
+```
+
+- `400` invalid request/body/query values
+- `401` missing/invalid auth header
+- `403` authenticated but forbidden action (non-owner operations)
+- `404` task not found
 

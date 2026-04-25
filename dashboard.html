@@ -62,7 +62,14 @@
           <select id="visibility" name="visibility">
             <option value="private">Private</option>
             <option value="public">Public</option>
+            <option value="selected">Selected Users</option>
           </select>
+
+          <div id="selected-users-group" class="selected-users-group hidden">
+            <label for="allowed-users">Allowed Users</label>
+            <select id="allowed-users" name="allowedUsers" multiple></select>
+            <p class="helper-text">Hold Cmd/Ctrl to select multiple users.</p>
+          </div>
 
           <button type="submit" class="primary">Create Task</button>
         </form>
@@ -84,6 +91,9 @@
               placeholder="Search by title..."
               aria-label="Search tasks by title"
             />
+            <input id="from-date" type="date" aria-label="Filter tasks from date" />
+            <input id="to-date" type="date" aria-label="Filter tasks to date" />
+            <button id="apply-date-filter-btn" type="button" class="ghost">Apply Dates</button>
             <button id="refresh-btn" type="button" class="ghost">Refresh</button>
           </div>
         </div>

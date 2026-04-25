@@ -63,10 +63,14 @@ flowchart LR
   - `title`
   - `description`
   - `status`
-  - `visibility` (`private` / `public`)
+  - `visibility` (`private` / `public` / `selected`)
   - `createdBy` (from authenticated user)
+  - `createdAt`
+  - `allowedUsers`
+  - `cancelledReason`, `cancelledAt`, `cancelledBy`
+  - `progressStatus` (`not_started` / `in_progress` / `completed`)
 - Enforces ownership rules on update/delete
-- Implements filterable listing (`mine`, `public`, `visible`)
+- Implements filterable listing (`mine`, `public`, `visible`) and date filtering (`from`, `to`)
 - Publishes `task_created` events to RabbitMQ
 
 ### Notification Service (`:4003`)
@@ -94,18 +98,43 @@ flowchart LR
 
 - `private`: only creator can see
 - `public`: all authenticated users can see
+- `selected`: creator and only users listed in `allowedUsers` can see
 
 ### Filters (`GET /tasks`)
 
 - `filter=mine` -> only tasks where `createdBy === currentUser`
 - `filter=public` -> only tasks where `visibility === "public"`
-- `filter=visible` (default) -> own tasks + public tasks from others
+- `filter=visible` (default) -> own tasks + public tasks + selected tasks where current user is allowed
+- Date range (optional): `from=YYYY-MM-DD&to=YYYY-MM-DD`
 
 ### Ownership Restrictions
 
-- `PATCH /tasks/:id` -> creator only
-- `DELETE /tasks/:id` -> creator only
-- non-owners receive `403`
+- Creator can always update, cancel, progress-update, and delete own tasks.
+- Selected collaborators (`allowedUsers`) can:
+  - update `status`
+  - update `progressStatus`
+  - cancel task with reason
+- Selected collaborators cannot:
+  - delete task
+  - change `createdBy`, `visibility`, or `allowedUsers`
+- Public viewers can only view unless explicitly selected in `allowedUsers`.
+- Private tasks remain creator-only for all actions.
+
+## Advanced Task Management Features
+
+- Date-based history filtering with `from` and `to` query params
+- Cancellation flow with mandatory reason and cancellation metadata
+- Selected-user task sharing through `allowedUsers`
+- Per-task progress management:
+  - `not_started` -> 0%
+  - `in_progress` -> 50%
+  - `completed` -> 100%
+- Frontend dashboard supports:
+  - date controls (`From Date`, `To Date`, apply button)
+  - selected users chooser when visibility is `selected`
+  - task creator and creation date display
+  - cancellation reason display for cancelled tasks
+  - per-task progress selector and visual mini progress bar
 
 ## Observability and Reliability
 
@@ -155,13 +184,15 @@ Base URL: `http://localhost:4000`
 
 - `POST /auth/register`
 - `POST /auth/login`
+- `GET /users` (JWT required, safe user list without password fields)
 
 ### Tasks (JWT required)
 
 - `GET /tasks`
-- `GET /tasks?filter=mine|public|visible`
+- `GET /tasks?filter=mine|public|visible&from=YYYY-MM-DD&to=YYYY-MM-DD`
 - `POST /tasks`
 - `PATCH /tasks/:id`
+- `PATCH /tasks/:id/cancel`
 - `DELETE /tasks/:id`
 
 ## Getting Started
@@ -232,6 +263,10 @@ Current tests cover:
 - auth register/login flow
 - invalid credential handling
 - task visibility filtering
+- selected-user visibility filtering
+- date-based task filtering
+- cancellation endpoint and ownership checks
+- progressStatus updates and ownership checks
 - private-task non-leakage
 - owner-only patch/delete restrictions
 - normalization behavior for status/visibility

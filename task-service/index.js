@@ -51,8 +51,9 @@ let nextTaskId = 1;
 let rabbitChannel = null;
 const TASK_EXCHANGE = 'task_events';
 const ALLOWED_FILTERS = new Set(['mine', 'public', 'visible']);
-const ALLOWED_VISIBILITY = new Set(['private', 'public']);
-const ALLOWED_STATUS = new Set(['pending', 'completed']);
+const ALLOWED_VISIBILITY = new Set(['private', 'public', 'selected']);
+const ALLOWED_STATUS = new Set(['pending', 'completed', 'cancelled']);
+const ALLOWED_PROGRESS_STATUS = new Set(['not_started', 'in_progress', 'completed']);
 
 function getCurrentUserId(req) {
   if (!req.user) {
@@ -78,6 +79,20 @@ function requireCurrentUserId(req, res) {
   return currentUser;
 }
 
+function getCurrentUserIdentifiers(req) {
+  const rawEmail = typeof req.user?.email === 'string' ? req.user.email.trim().toLowerCase() : '';
+  const rawUsername = typeof req.user?.username === 'string' ? req.user.username.trim().toLowerCase() : '';
+  const rawId = typeof req.user?.id === 'string' || typeof req.user?.id === 'number'
+    ? String(req.user.id).trim().toLowerCase()
+    : '';
+
+  const identifiers = new Set([rawEmail, rawUsername, rawId].filter(Boolean));
+  return {
+    primary: rawEmail || rawUsername || rawId || '',
+    all: identifiers
+  };
+}
+
 function sendBadRequest(res, message) {
   return res.status(400).json({ message });
 }
@@ -88,6 +103,142 @@ function sendForbidden(res, message) {
 
 function sendNotFound(res, message) {
   return res.status(404).json({ message });
+}
+
+function normalizeDateInput(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+function getDateRangeFromQuery(query) {
+  const fromRaw = normalizeDateInput(query.from);
+  const toRaw = normalizeDateInput(query.to);
+
+  if (query.from && !fromRaw) {
+    return { error: 'from must be in YYYY-MM-DD format' };
+  }
+
+  if (query.to && !toRaw) {
+    return { error: 'to must be in YYYY-MM-DD format' };
+  }
+
+  const fromDate = fromRaw ? new Date(`${fromRaw}T00:00:00.000Z`) : null;
+  const toDate = toRaw ? new Date(`${toRaw}T23:59:59.999Z`) : null;
+
+  if (fromDate && Number.isNaN(fromDate.getTime())) {
+    return { error: 'from must be a valid date' };
+  }
+
+  if (toDate && Number.isNaN(toDate.getTime())) {
+    return { error: 'to must be a valid date' };
+  }
+
+  if (fromDate && toDate && fromDate > toDate) {
+    return { error: 'from date cannot be after to date' };
+  }
+
+  return { fromDate, toDate };
+}
+
+function normalizeAllowedUsers(allowedUsers, currentUser) {
+  if (!Array.isArray(allowedUsers)) {
+    return [];
+  }
+
+  const normalized = allowedUsers
+    .map((user) => (typeof user === 'string' ? user.trim().toLowerCase() : ''))
+    .filter((user) => Boolean(user) && user !== currentUser);
+
+  return [...new Set(normalized)];
+}
+
+function toProgressPercent(progressStatus) {
+  if (progressStatus === 'completed') {
+    return 100;
+  }
+  if (progressStatus === 'in_progress') {
+    return 50;
+  }
+  return 0;
+}
+
+function taskToPublicShape(task) {
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    visibility: task.visibility,
+    createdBy: task.createdBy,
+    createdAt: task.createdAt,
+    allowedUsers: task.allowedUsers,
+    cancelledReason: task.cancelledReason,
+    cancelledAt: task.cancelledAt,
+    cancelledBy: task.cancelledBy,
+    progressStatus: task.progressStatus,
+    progressPercent: toProgressPercent(task.progressStatus)
+  };
+}
+
+function normalizeIdentityValue(value) {
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value).trim().toLowerCase();
+  }
+  return '';
+}
+
+function isCreator(user, task) {
+  const createdBy = normalizeIdentityValue(task.createdBy);
+  if (!createdBy) {
+    return false;
+  }
+  return user.all.has(createdBy);
+}
+
+function isAllowedUser(user, task) {
+  if (!Array.isArray(task.allowedUsers)) {
+    return false;
+  }
+  const normalizedAllowedUsers = new Set(task.allowedUsers.map(normalizeIdentityValue).filter(Boolean));
+  for (const identifier of user.all) {
+    if (normalizedAllowedUsers.has(identifier)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function canViewTask(user, task) {
+  if (isCreator(user, task)) {
+    return true;
+  }
+  if (task.visibility === 'selected') {
+    return isAllowedUser(user, task);
+  }
+  return task.visibility === 'public';
+}
+
+function canCollaborateOnTask(user, task) {
+  if (isCreator(user, task)) {
+    return true;
+  }
+  return task.visibility === 'selected' && isAllowedUser(user, task);
+}
+
+function canDeleteTask(user, task) {
+  return isCreator(user, task);
 }
 
 async function getRabbitChannel() {
@@ -237,34 +388,50 @@ app.get('/tasks', authenticate, (req, res) => {
     return sendBadRequest(res, 'Invalid filter value');
   }
 
+  const dateRange = getDateRangeFromQuery(req.query);
+  if (dateRange.error) {
+    return sendBadRequest(res, dateRange.error);
+  }
+
   const currentUser = requireCurrentUserId(req, res);
   if (!currentUser) {
     return;
   }
 
   const filteredTasks = tasks.filter((task) => {
-    const isOwner = task.createdBy === currentUser;
+    const currentUserInfo = getCurrentUserIdentifiers(req);
+    const isOwner = isCreator(currentUserInfo, task);
     const isPublic = task.visibility === 'public';
+    const isSelectedForUser = task.visibility === 'selected' && isAllowedUser(currentUserInfo, task);
 
-    if (filter === 'mine') return isOwner;
-    if (filter === 'public') return isPublic;
-    return isOwner || isPublic;
+    let canSeeByFilter = false;
+    if (filter === 'mine') canSeeByFilter = isOwner;
+    if (filter === 'public') canSeeByFilter = isPublic;
+    if (filter === 'visible') canSeeByFilter = isOwner || isPublic || isSelectedForUser;
+    if (!canSeeByFilter) return false;
+
+    if (!canViewTask(currentUserInfo, task)) {
+      return false;
+    }
+
+    const createdAtDate = new Date(task.createdAt);
+    if (dateRange.fromDate && createdAtDate < dateRange.fromDate) {
+      return false;
+    }
+    if (dateRange.toDate && createdAtDate > dateRange.toDate) {
+      return false;
+    }
+
+    return true;
   });
 
-  const publicTasks = filteredTasks.map(({ id, title, description, status, visibility, createdBy }) => ({
-    id,
-    title,
-    description,
-    status,
-    visibility,
-    createdBy
-  }));
+  const publicTasks = filteredTasks.map(taskToPublicShape);
   res.json(publicTasks);
 });
 
 // POST /tasks (protected)
 app.post('/tasks', authenticate, asyncHandler(async (req, res) => {
-  const { title, description, status, visibility } = req.body || {};
+  const { title, description, status, visibility, allowedUsers, progressStatus } = req.body || {};
 
   if (!title) {
     return sendBadRequest(res, 'title is required');
@@ -272,12 +439,17 @@ app.post('/tasks', authenticate, asyncHandler(async (req, res) => {
 
   const normalizedStatus = String(status || 'pending').trim().toLowerCase();
   if (!ALLOWED_STATUS.has(normalizedStatus)) {
-    return sendBadRequest(res, 'status must be pending or completed');
+    return sendBadRequest(res, 'status must be pending, completed or cancelled');
   }
 
   const normalizedVisibility = String(visibility || 'private').trim().toLowerCase();
   if (!ALLOWED_VISIBILITY.has(normalizedVisibility)) {
-    return sendBadRequest(res, 'visibility must be private or public');
+    return sendBadRequest(res, 'visibility must be private, public or selected');
+  }
+
+  const normalizedProgressStatus = String(progressStatus || 'not_started').trim().toLowerCase();
+  if (!ALLOWED_PROGRESS_STATUS.has(normalizedProgressStatus)) {
+    return sendBadRequest(res, 'progressStatus must be not_started, in_progress or completed');
   }
 
   const currentUser = requireCurrentUserId(req, res);
@@ -285,14 +457,31 @@ app.post('/tasks', authenticate, asyncHandler(async (req, res) => {
     return;
   }
 
+  const normalizedAllowedUsers = normalizeAllowedUsers(allowedUsers, currentUser);
+  if (normalizedVisibility === 'selected' && normalizedAllowedUsers.length === 0) {
+    return sendBadRequest(res, 'allowedUsers is required when visibility is selected');
+  }
+
+  const now = new Date().toISOString();
+  const taskStatus = normalizedStatus === 'cancelled'
+    ? 'cancelled'
+    : normalizedProgressStatus === 'completed'
+      ? 'completed'
+      : normalizedStatus;
+
   const task = {
     id: nextTaskId++,
     title,
     description: description || '',
-    status: normalizedStatus,
+    status: taskStatus,
     visibility: normalizedVisibility,
-    // Optional: store who created the task so we can show it later.
-    createdBy: currentUser
+    createdBy: currentUser,
+    createdAt: now,
+    allowedUsers: normalizedVisibility === 'selected' ? normalizedAllowedUsers : [],
+    cancelledReason: normalizedStatus === 'cancelled' ? 'Cancelled during creation' : null,
+    cancelledAt: normalizedStatus === 'cancelled' ? now : null,
+    cancelledBy: normalizedStatus === 'cancelled' ? currentUser : null,
+    progressStatus: normalizedStatus === 'cancelled' ? 'not_started' : normalizedProgressStatus
   };
 
   tasks.push(task);
@@ -308,7 +497,13 @@ app.post('/tasks', authenticate, asyncHandler(async (req, res) => {
       description: task.description,
       status: task.status,
       visibility: task.visibility,
-      createdBy: task.createdBy
+      createdBy: task.createdBy,
+      createdAt: task.createdAt,
+      allowedUsers: task.allowedUsers,
+      cancelledReason: task.cancelledReason,
+      cancelledAt: task.cancelledAt,
+      cancelledBy: task.cancelledBy,
+      progressStatus: task.progressStatus
     }
   };
 
@@ -331,29 +526,41 @@ app.post('/tasks', authenticate, asyncHandler(async (req, res) => {
 
   res.status(201).json({
     message: 'Task created successfully',
-    task: {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      status: task.status,
-      visibility: task.visibility,
-      createdBy: task.createdBy
-    }
+    task: taskToPublicShape(task)
   });
 }));
 
 // PATCH /tasks/:id (protected)
 app.patch('/tasks/:id', authenticate, asyncHandler(async (req, res) => {
   const taskId = Number(req.params.id);
-  const { status } = req.body || {};
+  const { status, progressStatus } = req.body || {};
 
   if (!Number.isInteger(taskId)) {
     return sendBadRequest(res, 'Invalid task id');
   }
 
-  const normalizedStatus = String(status || '').trim().toLowerCase();
-  if (normalizedStatus !== 'pending' && normalizedStatus !== 'completed') {
-    return sendBadRequest(res, 'status must be pending or completed');
+  const hasStatus = Object.prototype.hasOwnProperty.call(req.body || {}, 'status');
+  const hasProgressStatus = Object.prototype.hasOwnProperty.call(req.body || {}, 'progressStatus');
+  const hasVisibility = Object.prototype.hasOwnProperty.call(req.body || {}, 'visibility');
+  const hasAllowedUsers = Object.prototype.hasOwnProperty.call(req.body || {}, 'allowedUsers');
+  const hasCreatedBy = Object.prototype.hasOwnProperty.call(req.body || {}, 'createdBy');
+  if (hasVisibility || hasAllowedUsers || hasCreatedBy) {
+    return sendForbidden(res, 'Only creator can change sharing settings or ownership');
+  }
+  if (!hasStatus && !hasProgressStatus) {
+    return sendBadRequest(res, 'status or progressStatus is required');
+  }
+
+  const normalizedStatus = hasStatus ? String(status || '').trim().toLowerCase() : null;
+  if (hasStatus && !ALLOWED_STATUS.has(normalizedStatus)) {
+    return sendBadRequest(res, 'status must be pending, completed or cancelled');
+  }
+
+  const normalizedProgressStatus = hasProgressStatus
+    ? String(progressStatus || '').trim().toLowerCase()
+    : null;
+  if (hasProgressStatus && !ALLOWED_PROGRESS_STATUS.has(normalizedProgressStatus)) {
+    return sendBadRequest(res, 'progressStatus must be not_started, in_progress or completed');
   }
 
   const task = tasks.find((item) => item.id === taskId);
@@ -366,23 +573,87 @@ app.patch('/tasks/:id', authenticate, asyncHandler(async (req, res) => {
     return;
   }
 
-  if (task.createdBy !== currentUser) {
-    return sendForbidden(res, 'You can only update your own tasks');
+  const currentUserInfo = getCurrentUserIdentifiers(req);
+  logInfo(
+    `Permission check PATCH /tasks/${taskId}: user=${currentUserInfo.primary}, allowedUsers=${JSON.stringify(task.allowedUsers)}, canCollaborate=${canCollaborateOnTask(currentUserInfo, task)}`,
+    req.correlationId
+  );
+  if (!canCollaborateOnTask(currentUserInfo, task)) {
+    return sendForbidden(res, 'You do not have permission to update this task');
   }
 
-  task.status = normalizedStatus;
+  if (hasStatus) {
+    task.status = normalizedStatus;
+    if (normalizedStatus === 'cancelled') {
+      task.cancelledReason = task.cancelledReason || 'Cancelled';
+      task.cancelledAt = task.cancelledAt || new Date().toISOString();
+      task.cancelledBy = currentUserInfo.primary;
+    } else if (task.status !== 'cancelled') {
+      task.cancelledReason = null;
+      task.cancelledAt = null;
+      task.cancelledBy = null;
+    }
+  }
+
+  if (hasProgressStatus) {
+    task.progressStatus = normalizedProgressStatus;
+    if (normalizedProgressStatus === 'completed') {
+      task.status = 'completed';
+    }
+    if (normalizedProgressStatus === 'not_started' && task.status === 'completed') {
+      task.status = 'pending';
+    }
+  }
+
   logInfo(`Task status updated: id=${task.id}, status=${task.status}`, req.correlationId);
 
   return res.json({
     message: 'Task status updated successfully',
-    task: {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      status: task.status,
-      visibility: task.visibility,
-      createdBy: task.createdBy
-    }
+    task: taskToPublicShape(task)
+  });
+}));
+
+app.patch('/tasks/:id/cancel', authenticate, asyncHandler(async (req, res) => {
+  const taskId = Number(req.params.id);
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+
+  if (!Number.isInteger(taskId)) {
+    return sendBadRequest(res, 'Invalid task id');
+  }
+
+  if (!reason) {
+    return sendBadRequest(res, 'Cancellation reason is required');
+  }
+
+  const task = tasks.find((item) => item.id === taskId);
+  if (!task) {
+    return sendNotFound(res, 'Task not found');
+  }
+
+  const currentUser = requireCurrentUserId(req, res);
+  if (!currentUser) {
+    return;
+  }
+  const currentUserInfo = getCurrentUserIdentifiers(req);
+
+  logInfo(
+    `Permission check PATCH /tasks/${taskId}/cancel: user=${currentUserInfo.primary}, allowedUsers=${JSON.stringify(task.allowedUsers)}, canCollaborate=${canCollaborateOnTask(currentUserInfo, task)}`,
+    req.correlationId
+  );
+  if (!canCollaborateOnTask(currentUserInfo, task)) {
+    return sendForbidden(res, 'You do not have permission to cancel this task');
+  }
+
+  task.status = 'cancelled';
+  task.cancelledReason = reason;
+  task.cancelledAt = new Date().toISOString();
+  task.cancelledBy = currentUserInfo.primary;
+  task.progressStatus = 'not_started';
+
+  logInfo(`Task cancelled: id=${task.id}`, req.correlationId);
+  return res.json({
+    message: 'Task cancelled successfully',
+    task: taskToPublicShape(task)
   });
 }));
 
@@ -402,8 +673,9 @@ app.delete('/tasks/:id', authenticate, asyncHandler(async (req, res) => {
   if (!currentUser) {
     return;
   }
+  const currentUserInfo = getCurrentUserIdentifiers(req);
 
-  if (tasks[taskIndex].createdBy !== currentUser) {
+  if (!canDeleteTask(currentUserInfo, tasks[taskIndex])) {
     return sendForbidden(res, 'You can only delete your own tasks');
   }
 

@@ -4,6 +4,9 @@ let serverTasks = [];
 let currentTasks = [];
 let currentFilter = 'visible';
 let currentSearchTerm = '';
+let currentFromDate = '';
+let currentToDate = '';
+let availableUsers = [];
 
 function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -38,6 +41,13 @@ function getCurrentUserId() {
     return '';
   }
   return rawUserId.trim().toLowerCase();
+}
+
+function toIsoDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
 }
 
 async function apiRequest(path, options = {}) {
@@ -113,6 +123,58 @@ function applyTaskFilters() {
   renderTasks(visibleTasks);
 }
 
+function formatDisplayDate(value) {
+  if (!value) return 'N/A';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleString();
+}
+
+function getProgressPercent(progressStatus) {
+  if (progressStatus === 'completed') return 100;
+  if (progressStatus === 'in_progress') return 50;
+  return 0;
+}
+
+function getProgressLabel(progressStatus) {
+  if (progressStatus === 'in_progress') return 'In Progress';
+  if (progressStatus === 'completed') return 'Completed';
+  return 'Not Started';
+}
+
+function isTaskOwner(task, currentUser) {
+  return String(task.createdBy || '').toLowerCase() === currentUser;
+}
+
+function canCurrentUserModifyTask(task, currentUser) {
+  if (isTaskOwner(task, currentUser)) {
+    return true;
+  }
+
+  if (task.visibility !== 'selected') {
+    return false;
+  }
+
+  const allowedUsers = Array.isArray(task.allowedUsers) ? task.allowedUsers : [];
+  const normalizedAllowedUsers = allowedUsers.map((user) => String(user || '').trim().toLowerCase());
+  return normalizedAllowedUsers.includes(currentUser);
+}
+
+function canCurrentUserModifyTask(task, currentUser) {
+  if (isTaskOwner(task, currentUser)) {
+    return true;
+  }
+
+  if (task.visibility !== 'selected') {
+    return false;
+  }
+
+  const allowedUsers = Array.isArray(task.allowedUsers) ? task.allowedUsers : [];
+  return allowedUsers
+    .map((user) => String(user || '').trim().toLowerCase())
+    .includes(currentUser);
+}
+
 function renderTasks(tasks) {
   const list = document.getElementById('task-list');
   if (!list) return;
@@ -140,30 +202,63 @@ function renderTasks(tasks) {
 
   const currentUser = getCurrentUserId();
   list.innerHTML = currentTasks.map((task) => `
-    <li class="task-item ${isCompletedTask(task.status) ? 'is-completed' : ''}">
+    <li class="task-item ${isCompletedTask(task.status) ? 'is-completed' : ''} ${task.status === 'cancelled' ? 'is-cancelled' : ''}">
       <div class="task-main-row">
         <input
           class="task-check"
           type="checkbox"
           data-task-id="${task.id}"
           ${isCompletedTask(task.status) ? 'checked' : ''}
+          ${(task.status === 'cancelled' || !canCurrentUserModifyTask(task, currentUser)) ? 'disabled' : ''}
           aria-label="Task completion status"
         />
         <div class="task-content">
           <div class="task-title">${escapeHtml(task.title || 'Untitled Task')}</div>
           <p class="task-description">${escapeHtml(task.description || 'No description provided.')}</p>
-          ${task.visibility === 'public' ? `<p class="task-owner">Created by: ${escapeHtml(task.createdBy || 'unknown')}</p>` : ''}
+          <p class="task-owner">Created by: ${escapeHtml(task.createdBy || 'unknown')}</p>
+          <p class="task-owner">Created at: ${escapeHtml(formatDisplayDate(task.createdAt))}</p>
+          ${task.visibility === 'selected' && isTaskOwner(task, currentUser) ? `<p class="task-owner">Allowed users: ${escapeHtml((task.allowedUsers || []).join(', ') || 'None')}</p>` : ''}
+          ${task.status === 'cancelled' ? `
+            <p class="task-owner">Cancelled by: ${escapeHtml(task.cancelledBy || 'unknown')}</p>
+            <p class="task-owner">Cancelled at: ${escapeHtml(formatDisplayDate(task.cancelledAt))}</p>
+            <p class="task-cancelled-reason">Reason: ${escapeHtml(task.cancelledReason || 'No reason provided')}</p>
+          ` : ''}
           <div class="task-meta">
             <span>Status</span>
             <span class="status-badge ${getStatusClass(task.status)}">${escapeHtml(task.status || 'pending')}</span>
             <span class="visibility-badge ${getVisibilityClass(task.visibility)}">${escapeHtml(task.visibility || 'private')}</span>
           </div>
+          <div class="task-progress">
+            <label class="progress-label" for="progress-${task.id}">Progress</label>
+            <select
+              id="progress-${task.id}"
+              class="task-progress-select"
+              data-progress-id="${task.id}"
+              ${canCurrentUserModifyTask(task, currentUser) ? '' : 'disabled'}
+            >
+              <option value="not_started" ${task.progressStatus === 'not_started' ? 'selected' : ''}>Not Started</option>
+              <option value="in_progress" ${task.progressStatus === 'in_progress' ? 'selected' : ''}>In Progress</option>
+              <option value="completed" ${task.progressStatus === 'completed' ? 'selected' : ''}>Completed</option>
+            </select>
+            <div class="mini-progress-track">
+              <div class="mini-progress-fill" style="width:${getProgressPercent(task.progressStatus)}%;"></div>
+            </div>
+            <span class="progress-value">${getProgressLabel(task.progressStatus)} (${getProgressPercent(task.progressStatus)}%)</span>
+          </div>
           <div class="task-actions">
             <button
               type="button"
-              class="task-delete-btn ${String(task.createdBy || '').toLowerCase() === currentUser ? '' : 'is-disabled'}"
+              class="task-cancel-btn ${canCurrentUserModifyTask(task, currentUser) && task.status !== 'cancelled' ? '' : 'is-disabled'}"
+              data-cancel-id="${task.id}"
+              ${canCurrentUserModifyTask(task, currentUser) && task.status !== 'cancelled' ? '' : 'disabled'}
+            >
+              Cancel Task
+            </button>
+            <button
+              type="button"
+              class="task-delete-btn ${isTaskOwner(task, currentUser) ? '' : 'is-disabled'}"
               data-delete-id="${task.id}"
-              ${String(task.createdBy || '').toLowerCase() === currentUser ? '' : 'disabled'}
+              ${isTaskOwner(task, currentUser) ? '' : 'disabled'}
             >
               Delete
             </button>
@@ -178,6 +273,28 @@ function renderTasks(tasks) {
       const taskId = Number(event.target.dataset.taskId);
       const nextStatus = event.target.checked ? 'completed' : 'pending';
       await toggleTaskStatus(taskId, nextStatus);
+    });
+  });
+
+  list.querySelectorAll('.task-progress-select').forEach((select) => {
+    select.addEventListener('change', async (event) => {
+      const taskId = Number(event.target.dataset.progressId);
+      const nextProgressStatus = event.target.value;
+      await updateTaskProgress(taskId, nextProgressStatus);
+    });
+  });
+
+  list.querySelectorAll('.task-cancel-btn').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      if (event.currentTarget.disabled) {
+        return;
+      }
+      const taskId = Number(event.currentTarget.dataset.cancelId);
+      const reason = window.prompt('Please enter cancellation reason:');
+      if (reason === null) {
+        return;
+      }
+      await cancelTaskByReason(taskId, reason);
     });
   });
 
@@ -242,7 +359,11 @@ function updateTaskMetrics(tasks) {
 }
 
 async function loadTasks() {
-  const { response, data } = await apiRequest(`/tasks?filter=${encodeURIComponent(currentFilter)}`, { method: 'GET' });
+  const params = new URLSearchParams();
+  params.set('filter', currentFilter);
+  if (currentFromDate) params.set('from', currentFromDate);
+  if (currentToDate) params.set('to', currentToDate);
+  const { response, data } = await apiRequest(`/tasks?${params.toString()}`, { method: 'GET' });
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -259,9 +380,20 @@ async function loadTasks() {
 
 async function createTask(title, description) {
   const visibility = document.getElementById('visibility')?.value || 'private';
+  const allowedUsersSelect = document.getElementById('allowed-users');
+  const allowedUsers = visibility === 'selected' && allowedUsersSelect
+    ? Array.from(allowedUsersSelect.selectedOptions).map((option) => option.value)
+    : [];
+
   const { response, data } = await apiRequest('/tasks', {
     method: 'POST',
-    body: JSON.stringify({ title, description, visibility })
+    body: JSON.stringify({
+      title,
+      description,
+      visibility,
+      allowedUsers,
+      progressStatus: 'not_started'
+    })
   });
 
   if (!response.ok) {
@@ -282,6 +414,60 @@ async function updateTaskStatus(taskId, status) {
   }
 
   return data;
+}
+
+async function updateTaskProgressStatus(taskId, progressStatus) {
+  const { response, data } = await apiRequest(`/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ progressStatus })
+  });
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Failed to update task progress');
+  }
+
+  return data;
+}
+
+async function cancelTask(taskId, reason) {
+  const { response, data } = await apiRequest(`/tasks/${taskId}/cancel`, {
+    method: 'PATCH',
+    body: JSON.stringify({ reason })
+  });
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Failed to cancel task');
+  }
+
+  return data;
+}
+
+async function fetchUsers() {
+  const { response, data } = await apiRequest('/users', { method: 'GET' });
+  if (!response.ok) {
+    throw new Error(data.message || 'Failed to load users');
+  }
+  return Array.isArray(data) ? data : [];
+}
+
+function populateAllowedUsers(users) {
+  const select = document.getElementById('allowed-users');
+  if (!select) return;
+  select.innerHTML = users
+    .map((user) => `<option value="${escapeHtml(user.email)}">${escapeHtml(user.email)}</option>`)
+    .join('');
+}
+
+function toggleSelectedUsersInput() {
+  const visibility = document.getElementById('visibility');
+  const group = document.getElementById('selected-users-group');
+  if (!visibility || !group) return;
+
+  if (visibility.value === 'selected') {
+    group.classList.remove('hidden');
+  } else {
+    group.classList.add('hidden');
+  }
 }
 
 async function deleteTask(taskId) {
@@ -307,11 +493,53 @@ async function toggleTaskStatus(taskId, nextStatus) {
   applyTaskFilters();
 
   try {
+    const mappedProgressStatus = nextStatus === 'completed' ? 'completed' : 'not_started';
     await updateTaskStatus(taskId, nextStatus);
+    await updateTaskProgressStatus(taskId, mappedProgressStatus);
     showMessage('task-message', 'Task status updated.');
+    await loadTasks();
   } catch (err) {
     serverTasks = previousServerTasks;
     applyTaskFilters();
+    showMessage('task-message', err.message, true);
+  }
+}
+
+async function updateTaskProgress(taskId, progressStatus) {
+  const previousServerTasks = serverTasks.map((task) => ({ ...task }));
+  serverTasks = serverTasks.map((task) => {
+    if (task.id !== taskId) return task;
+    return {
+      ...task,
+      progressStatus,
+      status: progressStatus === 'completed' ? 'completed' : (task.status === 'completed' ? 'pending' : task.status)
+    };
+  });
+  applyTaskFilters();
+
+  try {
+    await updateTaskProgressStatus(taskId, progressStatus);
+    showMessage('task-message', 'Task progress updated.');
+    await loadTasks();
+  } catch (err) {
+    serverTasks = previousServerTasks;
+    applyTaskFilters();
+    showMessage('task-message', err.message, true);
+  }
+}
+
+async function cancelTaskByReason(taskId, reason) {
+  const trimmed = String(reason || '').trim();
+  if (!trimmed) {
+    showMessage('task-message', 'Cancellation reason is required.', true);
+    return;
+  }
+
+  try {
+    await cancelTask(taskId, trimmed);
+    showMessage('task-message', 'Task cancelled successfully.');
+    await loadTasks();
+  } catch (err) {
     showMessage('task-message', err.message, true);
   }
 }
@@ -376,6 +604,10 @@ function setupDashboardPage() {
   const refreshBtn = document.getElementById('refresh-btn');
   const filterSelect = document.getElementById('task-filter');
   const searchInput = document.getElementById('task-search');
+  const fromDateInput = document.getElementById('from-date');
+  const toDateInput = document.getElementById('to-date');
+  const applyDateFilterBtn = document.getElementById('apply-date-filter-btn');
+  const visibilitySelect = document.getElementById('visibility');
 
   if (filterSelect) {
     currentFilter = filterSelect.value || 'visible';
@@ -384,6 +616,9 @@ function setupDashboardPage() {
   if (searchInput) {
     currentSearchTerm = searchInput.value || '';
   }
+
+  if (fromDateInput) currentFromDate = fromDateInput.value || '';
+  if (toDateInput) currentToDate = toDateInput.value || '';
 
   taskForm.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -394,6 +629,7 @@ function setupDashboardPage() {
       await createTask(title, description);
       showMessage('task-message', 'Task created successfully.');
       taskForm.reset();
+      toggleSelectedUsersInput();
       await loadTasks();
     } catch (err) {
       showMessage('task-message', err.message, true);
@@ -432,6 +668,35 @@ function setupDashboardPage() {
       applyTaskFilters();
     });
   }
+
+  if (applyDateFilterBtn) {
+    applyDateFilterBtn.addEventListener('click', async () => {
+      currentFromDate = fromDateInput?.value || '';
+      currentToDate = toDateInput?.value || '';
+      try {
+        await loadTasks();
+        showMessage('task-message', 'Date filter applied.');
+      } catch (err) {
+        showMessage('task-message', err.message, true);
+      }
+    });
+  }
+
+  if (visibilitySelect) {
+    visibilitySelect.addEventListener('change', () => {
+      toggleSelectedUsersInput();
+    });
+  }
+
+  fetchUsers()
+    .then((users) => {
+      availableUsers = users;
+      populateAllowedUsers(availableUsers);
+      toggleSelectedUsersInput();
+    })
+    .catch((err) => {
+      showMessage('task-message', err.message, true);
+    });
 
   loadTasks().catch((err) => {
     showMessage('task-message', err.message, true);

@@ -208,6 +208,30 @@ async function forwardToAuth(req, res) {
   }
 }
 
+async function forwardUsersToAuth(req, res) {
+  try {
+    const url = `${AUTH_SERVICE_URL}/users`;
+    const response = await axios({
+      method: 'GET',
+      url,
+      headers: {
+        Authorization: req.headers['authorization'],
+        'x-correlation-id': req.correlationId
+      },
+      timeout: 5000
+    });
+
+    return res.status(response.status).json(response.data);
+  } catch (err) {
+    if (err.response) {
+      return res.status(err.response.status).json(err.response.data);
+    }
+
+    logError(`Error forwarding request from API Gateway (users): ${err.message}`, req.correlationId);
+    return res.status(502).json({ message: 'Upstream service error' });
+  }
+}
+
 // Forward a request to the Task Service.
 // We keep the /tasks path so it matches the Task Service routes.
 async function forwardToTasks(req, res) {
@@ -247,6 +271,10 @@ app.get('/health', (req, res) => {
 // Forward all /auth/* routes to the Auth Service.
 app.all('/auth/*', asyncHandler(async (req, res) => {
   await forwardToAuth(req, res);
+}));
+
+app.get('/users', authenticate, asyncHandler(async (req, res) => {
+  await forwardUsersToAuth(req, res);
 }));
 
 // Forward /tasks routes to the Task Service, but require a token first.

@@ -198,6 +198,15 @@ app.post('/login', asyncHandler(async (req, res) => {
   });
 }));
 
+app.get('/users', asyncHandler(async (req, res) => {
+  const safeUsers = users.map((user) => ({
+    email: user.email,
+    role: user.role
+  }));
+
+  return res.json(safeUsers);
+}));
+
 app.use((err, req, res, next) => {
   if (res.headersSent) {
     return next(err);
